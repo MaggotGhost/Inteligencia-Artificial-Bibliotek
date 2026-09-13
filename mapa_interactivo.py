@@ -83,5 +83,7 @@ def generar_mapa(origen="B01", destino="B16", algoritmo="ucs", archivo_salida="m
 
 
 if __name__ == "__main__":
-    generar_mapa(origen="B13", destino="B26", algoritmo="ucs",
-                 archivo_salida="mapa_bibliotecas_bogota.html")
+    generar_mapa(origen="B06", destino="B08", algoritmo="bfs",
+                 archivo_salida="mapa_bfs_B06_B08.html")
+    generar_mapa(origen="B06", destino="B08", algoritmo="ucs",
+                 archivo_salida="mapa_ucs_B06_B08.html")

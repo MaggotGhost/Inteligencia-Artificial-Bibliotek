@@ -4,24 +4,37 @@ grafo.py
 Base de conocimiento (hechos) y construcción del grafo de bibliotecas de Bogotá.
 
 - Los NODOS son las bibliotecas (con su localidad, dirección y coordenadas reales).
-- Las ARISTAS se calculan con la distancia real entre bibliotecas (formula de
-  Haversine, en kilómetros) y representan el COSTO de moverse de una biblioteca
-  a otra. El grafo se construye conectando cada biblioteca con sus vecinas más
-  cercanas (K-Nearest Neighbors) y garantizando que sea conexo con un Árbol de
-  Expansión Mínima (Prim), tal como se pide: "tengo que poner las distancias y
-  base de conocimiento".
+- Las ARISTAS (qué biblioteca se conecta con cuál) se deciden con la distancia
+  en línea recta (Haversine): cada nodo se une a sus K vecinas más cercanas,
+  y se agrega un Árbol de Expansión Mínima (Prim) para garantizar que el
+  grafo sea conexo. Haversine aquí SOLO decide la estructura del grafo.
+- El COSTO de cada arista (lo que usará UCS) es la DISTANCIA REAL RECORRIDA
+  POR CALLE, obtenida de OSRM (routing real, no línea recta). Los resultados
+  se guardan en cache_distancias_reales.json para no tener que volver a
+  consultar internet cada vez que se corre el programa.
 
-Este módulo NO depende del Excel para funcionar (los datos están embebidos como
-base de conocimiento), pero incluye una función opcional para regenerarlos desde
-el archivo bibliotecas_bogota_final.xlsx si el usuario actualiza la información.
+Requisitos:
+    pip install requests
+
+Uso normal (ya con la cache generada):
+    from grafo import construir_grafo, NODOS
+    grafo = construir_grafo()
+
+La primera vez que se corre (o si agregas una arista nueva) sí necesita
+internet para consultar OSRM; las siguientes veces usa la cache y es
+instantáneo.
 """
 
+import json
 import math
+import os
 from collections import defaultdict
 
-# ---------------------------------------------------------------------------
+import requests
+
+# -----------------------------------------------------------------------
 # 1) BASE DE CONOCIMIENTO: hechos sobre las bibliotecas (nodos del problema)
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------
 BIBLIOTECAS = [
     {"id": "B01", "nombre": "Manuel Zapata Olivella - El Tintal", "localidad": "Kennedy", "lat": 4.6430923, "lon": -74.1547938},
     {"id": "B02", "nombre": "Biblioteca Publica Bosa", "localidad": "Bosa", "lat": 4.6329853, "lon": -74.2010831},
@@ -52,16 +65,19 @@ BIBLIOTECAS = [
     {"id": "B27", "nombre": "CEFE Cometas", "localidad": "Suba", "lat": 4.714476743302042, "lon": -74.08661441534338},
     {"id": "B28", "nombre": "Fontibon", "localidad": "Fontibon", "lat": 4.67357, "lon": -74.14423},
 ]
-
 NODOS = {b["id"]: b for b in BIBLIOTECAS}
 
+CACHE_ARCHIVO = "cache_distancias_reales.json"
+OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
 
-# ---------------------------------------------------------------------------
-# 2) COSTO ENTRE NODOS: distancia real (km) con la formula de Haversine
-# ---------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------
+# 2) ESTRUCTURA DEL GRAFO: Haversine solo decide qué nodos se conectan
+# -----------------------------------------------------------------------
 def distancia_haversine(lat1, lon1, lat2, lon2):
-    """Distancia en km entre dos puntos (lat, lon) sobre la superficie terrestre."""
-    R = 6371.0  # radio de la Tierra en km
+    """Distancia en línea recta (km). Se usa SOLO para elegir vecinos
+    cercanos, NUNCA como el costo final de la arista."""
+    R = 6371.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlmb = math.radians(lon2 - lon1)
@@ -69,14 +85,7 @@ def distancia_haversine(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
-# ---------------------------------------------------------------------------
-# 3) CONSTRUCCION DEL GRAFO (aristas ponderadas por distancia)
-#    - K vecinos mas cercanos por nodo (grafo "realista": cada biblioteca solo
-#      se conecta con las bibliotecas cercanas, no con todas).
-#    - Arbol de Expansion Minima (Prim) agregado encima para GARANTIZAR que el
-#      grafo sea conexo (todas las bibliotecas se pueden alcanzar entre si).
-# ---------------------------------------------------------------------------
-def _todas_las_distancias():
+def _todas_las_distancias_lineales():
     ids = list(NODOS.keys())
     dist = {}
     for i, a in enumerate(ids):
@@ -88,7 +97,7 @@ def _todas_las_distancias():
 
 
 def _mst_prim(dist, ids):
-    """Arbol de expansion minima con el algoritmo de Prim. Devuelve set de aristas."""
+    """Árbol de Expansión Mínima (Prim) -> garantiza que el grafo sea conexo."""
     visitados = {ids[0]}
     aristas = set()
     restantes = set(ids[1:])
@@ -106,42 +115,100 @@ def _mst_prim(dist, ids):
     return aristas
 
 
-def construir_grafo(k_vecinos=3):
-    """
-    Construye el grafo como diccionario de adyacencia:
-        grafo["B01"] = [("B03", 4.82), ("B04", 6.10), ...]
-    El costo de cada arista es la distancia real en km (redondeada a 2 decimales).
-    """
+def _estructura_del_grafo(k_vecinos=3):
+    """Decide QUÉ conexiones existen (no sus pesos), combinando MST + KNN
+    sobre distancia en línea recta."""
     ids = list(NODOS.keys())
-    dist = _todas_las_distancias()
-
-    aristas = set(_mst_prim(dist, ids))  # garantiza conexidad
-
-    # K vecinos mas cercanos por nodo (grafo mas realista, con varios caminos)
+    dist = _todas_las_distancias_lineales()
+    aristas = set(_mst_prim(dist, ids))
     for u in ids:
         vecinos = sorted((v for v in ids if v != u), key=lambda v: dist[(u, v)])
         for v in vecinos[:k_vecinos]:
             aristas.add(tuple(sorted((u, v))))
+    return aristas
+
+
+# -----------------------------------------------------------------------
+# 3) COSTO DE CADA ARISTA: distancia REAL por calle (OSRM), con cache
+# -----------------------------------------------------------------------
+def _cargar_cache():
+    if os.path.exists(CACHE_ARCHIVO):
+        with open(CACHE_ARCHIVO, encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _guardar_cache(cache):
+    with open(CACHE_ARCHIVO, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def _distancia_real_osrm(a, b):
+    """Consulta OSRM (routing real por calles) y devuelve la distancia en km."""
+    na, nb = NODOS[a], NODOS[b]
+    url = f"{OSRM_URL}/{na['lon']},{na['lat']};{nb['lon']},{nb['lat']}?overview=false"
+    headers = {"User-Agent": "proyecto-mapa-ia-bogota/1.0 (uso academico)"}
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    metros = resp.json()["routes"][0]["distance"]
+    return round(metros / 1000, 2)
+
+
+def _costo_real(a, b, cache):
+    """Devuelve la distancia real por calle entre a y b, usando cache si
+    ya existe; si no, consulta OSRM y guarda el resultado."""
+    clave = f"{a}-{b}"
+    clave_inversa = f"{b}-{a}"
+    if clave in cache:
+        return cache[clave]
+    if clave_inversa in cache:
+        return cache[clave_inversa]
+
+    try:
+        d = _distancia_real_osrm(a, b)
+    except Exception as e:
+        # Si OSRM falla (sin internet, servidor caído, etc.) usamos la
+        # distancia en línea recta como respaldo, avisando en consola.
+        d = round(distancia_haversine(NODOS[a]["lat"], NODOS[a]["lon"], NODOS[b]["lat"], NODOS[b]["lon"]), 2)
+        print(f"  [!] OSRM fallo para {a}-{b} ({e}); uso linea recta como respaldo: {d} km")
+
+    cache[clave] = d
+    return d
+
+
+# -----------------------------------------------------------------------
+# 4) CONSTRUIR EL GRAFO FINAL: estructura (Haversine) + costo (real)
+# -----------------------------------------------------------------------
+def construir_grafo(k_vecinos=3):
+    """
+    Devuelve el grafo como diccionario de adyacencia:
+        grafo["B01"] = [("B03", 4.82), ("B04", 6.10), ...]
+    donde el número es la distancia REAL por calle en km.
+    """
+    aristas = _estructura_del_grafo(k_vecinos)
+    cache = _cargar_cache()
+
+    faltantes = [par for par in aristas if f"{par[0]}-{par[1]}" not in cache and f"{par[1]}-{par[0]}" not in cache]
+    if faltantes:
+        print(f"Consultando distancia real por calle para {len(faltantes)} conexiones nuevas...")
 
     grafo = defaultdict(list)
     for u, v in aristas:
-        d = round(dist[(u, v)], 2)
+        d = _costo_real(u, v, cache)
         grafo[u].append((v, d))
         grafo[v].append((u, d))
 
-    # ordenar vecinos por id para que la exploracion sea determinista
+    if faltantes:
+        _guardar_cache(cache)
+
     for u in grafo:
         grafo[u].sort(key=lambda par: par[0])
 
     return dict(grafo)
 
 
-def cargar_desde_excel(ruta="data_bibliotecas_bogota.xlsx"):
-    """
-    Opcional: si el usuario actualiza el Excel, esta funcion regenera la
-    base de conocimiento (BIBLIOTECAS/NODOS) leyendo el archivo original.
-    Requiere openpyxl.
-    """
+def cargar_desde_excel(ruta="bibliotecas_bogota_final.xlsx"):
+    """Opcional: regenera la base de conocimiento leyendo el Excel original."""
     import openpyxl
     wb = openpyxl.load_workbook(ruta, data_only=True)
     ws = wb["Bibliotecas Bogota"]
@@ -156,7 +223,7 @@ def cargar_desde_excel(ruta="data_bibliotecas_bogota.xlsx"):
 if __name__ == "__main__":
     g = construir_grafo()
     total_aristas = sum(len(v) for v in g.values()) // 2
-    print(f"Nodos (bibliotecas): {len(NODOS)}")
-    print(f"Aristas (conexiones con distancia): {total_aristas}")
+    print(f"\nNodos (bibliotecas): {len(NODOS)}")
+    print(f"Aristas (conexiones con distancia real por calle): {total_aristas}")
     for nodo, vecinos in g.items():
         print(nodo, "->", vecinos)
