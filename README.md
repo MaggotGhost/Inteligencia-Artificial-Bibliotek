@@ -17,7 +17,8 @@ dos bibliotecas usando dos algoritmos de **búsqueda no informada**:
 | `main.py` | Interfaz por **consola** (no requiere librerías gráficas) |
 | `interfaz.py` | Interfaz **gráfica** (Tkinter) con mapa embebido (matplotlib) |
 | `mapa_interactivo.py` | Genera un **mapa HTML interactivo** (folium) sobre el mapa real de Bogotá |
-| `data_bibliotecas_bogota.xlsx` | Excel original con los datos |
+| `bibliotecas_bogota_final.xlsx` | Excel original con los datos |
+| `validar.py` | Comprobaciones automaticas del grafo, BFS, UCS, distancias y Excel |
 
 ## Cómo se construyó el grafo (la "base de conocimiento")
 
@@ -42,6 +43,9 @@ Resultado: 28 nodos, 54 aristas ponderadas.
 ```bash
 pip install matplotlib folium openpyxl
 
+# Verificar que el proyecto quedo bien
+python validar.py
+
 # Opción 1: consola (siempre funciona)
 python3 main.py
 
@@ -54,6 +58,18 @@ python3 mapa_interactivo.py
 
 > Nota: `interfaz.py` usa Tkinter, que viene con Python pero en Linux a veces
 > hay que instalarlo aparte: `sudo apt install python3-tk`.
+
+La validacion debe terminar con:
+
+```text
+OK: grafo, BFS, UCS, distancias y Excel verificados.
+```
+
+La prueba usa `B13` como origen y `B26` como destino. BFS debe encontrar una
+ruta de 100.90 km y UCS una de 95.83 km. La diferencia es esperada: BFS
+minimiza la cantidad de saltos, mientras UCS minimiza la distancia acumulada.
+Ademas, `validar.py` compara UCS con una implementacion independiente de
+Dijkstra para todos los pares de bibliotecas.
 
 ## Relación con la teoría (diapositivas del curso)
 

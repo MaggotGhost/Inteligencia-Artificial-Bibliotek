@@ -5,11 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "PowerShell: Launch Current File",
-            "type": "PowerShell",
+            "name": "Python: main.py",
+            "type": "debugpy",
             "request": "launch",
-            "script": "${file}",
-            "args": []
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal"
         }
     ]
 }
