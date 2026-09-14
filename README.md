@@ -12,11 +12,7 @@ dos bibliotecas usando dos algoritmos de **búsqueda no informada**:
 
 | Archivo | Contenido |
 |---|---|
-| `grafo.py` | Base de conocimiento (las 28 bibliotecas con localidad y coordenadas) y construcción del grafo (aristas = distancias reales) |
-| `busquedas.py` | Implementación de BFS y UCS, con métricas de nodos expandidos/generados y memoria máxima |
-| `main.py` | Interfaz por **consola** (no requiere librerías gráficas) |
-| `interfaz.py` | Interfaz **gráfica** (Tkinter) con mapa embebido (matplotlib) |
-| `mapa_interactivo.py` | Genera un **mapa HTML interactivo** (folium) sobre el mapa real de Bogotá |
+| `main.py` | Aplicación completa: datos, grafo, BFS, UCS, consola, interfaz gráfica, mapas HTML y validación |
 | `bibliotecas_bogota_final.xlsx` | Excel original con los datos |
 | `validar.py` | Comprobaciones automaticas del grafo, BFS, UCS, distancias y Excel |
 
@@ -41,19 +37,22 @@ Resultado: 28 nodos, 54 aristas ponderadas.
 ## Cómo ejecutar
 
 ```bash
-pip install matplotlib folium openpyxl
+pip install requests matplotlib folium openpyxl
 
 # Verificar que el proyecto quedo bien
 python validar.py
 
 # Opción 1: consola (siempre funciona)
-python3 main.py
+python main.py
 
 # Opción 2: interfaz gráfica
-python3 interfaz.py
+python main.py --gui
 
 # Opción 3: mapa interactivo HTML
-python3 mapa_interactivo.py
+python main.py --mapa
+
+# Validar el proyecto
+python main.py --validar
 ```
 
 > Nota: `interfaz.py` usa Tkinter, que viene con Python pero en Linux a veces
