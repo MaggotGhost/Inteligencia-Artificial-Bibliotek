@@ -1,5 +1,10 @@
-"""Aplicacion completa de rutas entre bibliotecas de Bogota.
+"""BIBLIOTECAS DE BOGOTÁ Y SUS RESPECTIVAS RUTAS
 
+##PAULA ROMERO
+##YESSICA TRIANA
+##DANNA SOLER
+
+#------------------------SOLUCIÓN-------------------------#
 Uso:
     python main.py                 # consola
     python main.py --gui            # interfaz Tkinter y Matplotlib
