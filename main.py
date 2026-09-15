@@ -20,6 +20,7 @@ import os
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
+##BIBLIOTECA DATOS TOMADOS ARCHIVO XLSX##
 
 BIBLIOTECAS = [
     {"id": "B01", "nombre": "Manuel Zapata Olivella - El Tintal", "localidad": "Kennedy", "lat": 4.6430923, "lon": -74.1547938},
@@ -54,6 +55,8 @@ BIBLIOTECAS = [
 NODOS = {biblioteca["id"]: biblioteca for biblioteca in BIBLIOTECAS}
 CACHE_ARCHIVO = "cache_distancias_reales.json"
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
+
+##FUNCIONAMIENTO EN CASO DADO QUE NO HAYA INTERNET##
 
 
 def distancia_haversine(lat1, lon1, lat2, lon2):
@@ -187,8 +190,16 @@ def _costo_de_camino(grafo, camino):
                for origen, destino in zip(camino, camino[1:]))
 
 
+def _heuristica(origen, destino):
+    return distancia_haversine(
+        NODOS[origen]["lat"], NODOS[origen]["lon"],
+        NODOS[destino]["lat"], NODOS[destino]["lon"],
+    )
+
+##BUSQUEDA POR ANCHURA##
+
 def busqueda_anchura(grafo, origen, destino):
-    nombre = "Busqueda en Anchura (BFS)"
+    nombre = "##busqueda por anchura##"
     if origen not in grafo or destino not in grafo:
         return _resultado_fallido(nombre, origen, destino)
     frontera, visitados = deque([origen]), {origen}
@@ -209,9 +220,11 @@ def busqueda_anchura(grafo, origen, destino):
                 generados += 1
     return ResultadoBusqueda(nombre, origen, destino, [], 0, len(orden_visita), generados, max_memoria, orden_visita, False)
 
+##BUSQUEDA POR COSTO UNIFORME##
+
 
 def busqueda_costo_uniforme(grafo, origen, destino):
-    nombre = "Costo Uniforme (UCS)"
+    nombre = "##busqueda por costo uniforme##"
     if origen not in grafo or destino not in grafo:
         return _resultado_fallido(nombre, origen, destino)
     contador, frontera = 0, [(0, 0, origen)]
@@ -232,6 +245,61 @@ def busqueda_costo_uniforme(grafo, origen, destino):
                 costos[vecino], padres[vecino] = nuevo_costo, actual
                 contador += 1
                 heapq.heappush(frontera, (nuevo_costo, contador, vecino))
+                generados += 1
+    return ResultadoBusqueda(nombre, origen, destino, [], 0, len(orden_visita), generados, max_memoria, orden_visita, False)
+
+##BUSQUEDA VORAZ##
+def busqueda_voraz(grafo, origen, destino):
+    nombre = "##busqueda por metodo voraz##"
+    if origen not in grafo or destino not in grafo:
+        return _resultado_fallido(nombre, origen, destino)
+    frontera = [( _heuristica(origen, destino), origen)]
+    visitados, padres, orden_visita = set(), {}, []
+    generados, max_memoria = 1, 1
+    while frontera:
+        max_memoria = max(max_memoria, len(frontera))
+        _, actual = heapq.heappop(frontera)
+        if actual in visitados:
+            continue
+        visitados.add(actual)
+        orden_visita.append(actual)
+        if actual == destino:
+            camino = _reconstruir_camino(padres, destino)
+            return ResultadoBusqueda(nombre, origen, destino, camino, _costo_de_camino(grafo, camino), len(orden_visita), generados, max_memoria, orden_visita)
+        for vecino, _ in grafo[actual]:
+            if vecino not in visitados:
+                padres[vecino] = actual
+                heapq.heappush(frontera, (_heuristica(vecino, destino), vecino))
+                generados += 1
+    return ResultadoBusqueda(nombre, origen, destino, [], 0, len(orden_visita), generados, max_memoria, orden_visita, False)
+
+
+##BUSQUEDA A*##
+
+def busqueda_a_estrella(grafo, origen, destino):
+    nombre = "##busqueda por A*##"
+    if origen not in grafo or destino not in grafo:
+        return _resultado_fallido(nombre, origen, destino)
+    contador, frontera = 0, [( _heuristica(origen, destino), 0, origen)]
+    costos, padres, visitados, orden_visita = {origen: 0}, {}, set(), []
+    generados, max_memoria = 1, 1
+    while frontera:
+        max_memoria = max(max_memoria, len(frontera))
+        _, costo_actual, actual = heapq.heappop(frontera)
+        if actual in visitados:
+            continue
+        visitados.add(actual)
+        orden_visita.append(actual)
+        if actual == destino:
+            camino = _reconstruir_camino(padres, destino)
+            return ResultadoBusqueda(nombre, origen, destino, camino, costo_actual, len(orden_visita), generados, max_memoria, orden_visita)
+        for vecino, peso in grafo[actual]:
+            nuevo_costo = costo_actual + peso
+            if nuevo_costo < costos.get(vecino, float("inf")):
+                costos[vecino] = nuevo_costo
+                padres[vecino] = actual
+                contador += 1
+                heapq.heappush(frontera, (nuevo_costo + _heuristica(vecino, destino), nuevo_costo, vecino))
                 generados += 1
     return ResultadoBusqueda(nombre, origen, destino, [], 0, len(orden_visita), generados, max_memoria, orden_visita, False)
 
@@ -320,7 +388,9 @@ def iniciar_gui():
             self.algoritmo = tk.StringVar(value="ucs")
             ttk.Radiobutton(panel, text="Busqueda en Anchura (BFS)", variable=self.algoritmo, value="bfs").grid(row=1, column=1, sticky="w")
             ttk.Radiobutton(panel, text="Costo Uniforme (UCS)", variable=self.algoritmo, value="ucs").grid(row=1, column=2, sticky="w")
-            ttk.Button(panel, text="Buscar ruta", command=self.buscar_ruta).grid(row=1, column=3, sticky="e")
+            ttk.Radiobutton(panel, text="Busqueda Voraz (Greedy)", variable=self.algoritmo, value="greedy").grid(row=2, column=1, sticky="w")
+            ttk.Radiobutton(panel, text="Busqueda A*", variable=self.algoritmo, value="astar").grid(row=2, column=2, sticky="w")
+            ttk.Button(panel, text="Buscar ruta", command=self.buscar_ruta).grid(row=2, column=3, sticky="e")
             self.texto_resultado = tk.Text(self, height=8, wrap="word")
             self.texto_resultado.pack(side="top", fill="x", padx=10, pady=5)
             self.fig, self.ax = plt.subplots(figsize=(8, 6))
@@ -354,9 +424,14 @@ def iniciar_gui():
             if origen == destino:
                 messagebox.showwarning("Aviso", "Elige dos bibliotecas distintas.")
                 return
-            resultado = (busqueda_anchura(self.grafo, origen, destino)
-                         if self.algoritmo.get() == "bfs"
-                         else busqueda_costo_uniforme(self.grafo, origen, destino))
+            if self.algoritmo.get() == "bfs":
+                resultado = busqueda_anchura(self.grafo, origen, destino)
+            elif self.algoritmo.get() == "greedy":
+                resultado = busqueda_voraz(self.grafo, origen, destino)
+            elif self.algoritmo.get() == "astar":
+                resultado = busqueda_a_estrella(self.grafo, origen, destino)
+            else:
+                resultado = busqueda_costo_uniforme(self.grafo, origen, destino)
             self.texto_resultado.delete("1.0", tk.END)
             self.texto_resultado.insert(tk.END, resultado.resumen())
             self.dibujar_mapa(resultado.camino if resultado.encontrado else None)
@@ -394,6 +469,8 @@ def main():
     parser.add_argument("--gui", action="store_true", help="abrir interfaz grafica")
     parser.add_argument("--mapa", action="store_true", help="generar mapas HTML BFS y UCS")
     parser.add_argument("--validar", action="store_true", help="ejecutar validaciones")
+    parser.add_argument("--voraz", action="store_true", help="ejecutar busqueda voraz")
+    parser.add_argument("--astar", action="store_true", help="ejecutar busqueda A*")
     argumentos = parser.parse_args()
     if argumentos.gui:
         iniciar_gui()
@@ -405,8 +482,20 @@ def main():
     if argumentos.validar:
         validar()
         return
+    if argumentos.voraz:
+        grafo = construir_grafo()
+        origen = pedir_id("\nID de biblioteca de ORIGEN: ")
+        destino = pedir_id("ID de biblioteca de DESTINO: ")
+        print("\n" + busqueda_voraz(grafo, origen, destino).resumen())
+        return
+    if argumentos.astar:
+        grafo = construir_grafo()
+        origen = pedir_id("\nID de biblioteca de ORIGEN: ")
+        destino = pedir_id("ID de biblioteca de DESTINO: ")
+        print("\n" + busqueda_a_estrella(grafo, origen, destino).resumen())
+        return
     grafo = construir_grafo()
-    print("=== Rutas entre bibliotecas de Bogota (BFS vs Costo Uniforme) ===")
+    print("=== Rutas entre bibliotecas de Bogota (BFS, UCS, Voraz y A*) ===")
     listar_bibliotecas()
 
     origen = pedir_id("\nID de biblioteca de ORIGEN: ")
@@ -415,14 +504,23 @@ def main():
     print("\nAlgoritmo:")
     print("  1) Busqueda en Anchura (BFS)")
     print("  2) Costo Uniforme (UCS)")
-    print("  3) Los dos (comparar)")
-    opcion = input("Elige 1, 2 o 3: ").strip()
+    print("  3) Los dos (comparar BFS y UCS)")
+    print("  4) Busqueda Voraz (Greedy)")
+    print("  5) Busqueda A*")
+    print("  6) Todos los algoritmos")
+    opcion = input("Elige 1, 2, 3, 4, 5 o 6: ").strip()
 
-    if opcion in ("1", "3"):
+    if opcion in ("1", "3", "6"):
         r = busqueda_anchura(grafo, origen, destino)
         print("\n" + r.resumen())
-    if opcion in ("2", "3"):
+    if opcion in ("2", "3", "6"):
         r = busqueda_costo_uniforme(grafo, origen, destino)
+        print("\n" + r.resumen())
+    if opcion in ("4", "6"):
+        r = busqueda_voraz(grafo, origen, destino)
+        print("\n" + r.resumen())
+    if opcion in ("5", "6"):
+        r = busqueda_a_estrella(grafo, origen, destino)
         print("\n" + r.resumen())
 
 
